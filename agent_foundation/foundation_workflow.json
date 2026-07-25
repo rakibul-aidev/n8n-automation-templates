@@ -1,0 +1,235 @@
+{
+  "name": "Agent Foundation — Email Triage",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "email-triage",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "node_webhook",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300],
+      "webhookId": "email-triage-foundation"
+    },
+    {
+      "parameters": {
+        "functionCode": "// Validate and normalise the incoming email payload\nconst body = $input.first().json;\n\nconst required = ['email_id', 'sender', 'subject', 'body'];\nconst missing = required.filter(k => !body[k]);\nif (missing.length > 0) {\n  throw new Error(`Missing required fields: ${missing.join(', ')}`);\n}\n\nreturn [{\n  json: {\n    email_id:    body.email_id,\n    sender:      body.sender,\n    subject:     body.subject,\n    body:        body.body,\n    received_at: body.received_at || new Date().toISOString(),\n    valid:       true\n  }\n}];"
+      },
+      "id": "node_validate",
+      "name": "Validate & Normalise",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:8001/run",
+        "method": "POST",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "trigger_data",
+              "value": "={{ $json }}"
+            },
+            {
+              "name": "agent",
+              "value": "email_triage"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "node_agent_call",
+      "name": "Run Agent (Python)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 300],
+      "notes": "Calls the Python agent runner via local HTTP. Deploy agent_runner.py as a FastAPI app on port 8001. See examples/email_triage_agent.py."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.status }}",
+              "operation": "equals",
+              "value2": "completed"
+            }
+          ]
+        }
+      },
+      "id": "node_check_status",
+      "name": "Check Status",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"status\": \"ok\", \"run_id\": $json.run_id, \"summary\": $json.summary } }}"
+      },
+      "id": "node_respond_ok",
+      "name": "Respond 200 OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1120, 200]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseCode": 202,
+        "responseBody": "={{ { \"status\": $json.status, \"run_id\": $json.run_id, \"handoff_id\": $json.handoff_id, \"message\": \"Agent escalated — awaiting human review\" } }}"
+      },
+      "id": "node_respond_escalated",
+      "name": "Respond 202 Escalated",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1120, 400]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Log run metadata to stdout (picked up by Docker/n8n log aggregator)\nconst data = $input.first().json;\nconsole.log(JSON.stringify({\n  event:    'agent_run_complete',\n  run_id:   data.run_id,\n  status:   data.status,\n  steps:    data.steps,\n  summary:  data.summary,\n  ts:       new Date().toISOString()\n}));\nreturn $input.all();"
+      },
+      "id": "node_log",
+      "name": "Audit Log",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 300],
+      "notes": "Structured JSON log. Wire to your log aggregator (Datadog, CloudWatch, etc.)"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.valid }}",
+              "operation": "equals",
+              "value2": "true"
+            }
+          ]
+        }
+      },
+      "id": "node_check_valid",
+      "name": "Is Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [680, 480]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseCode": 400,
+        "responseBody": "={{ { \"error\": \"Invalid payload\", \"details\": $json.error } }}"
+      },
+      "id": "node_respond_400",
+      "name": "Respond 400 Bad Request",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [900, 480]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Validate & Normalise",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate & Normalise": {
+      "main": [
+        [
+          {
+            "node": "Run Agent (Python)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ],
+      "error": [
+        [
+          {
+            "node": "Respond 400 Bad Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run Agent (Python)": {
+      "main": [
+        [
+          {
+            "node": "Check Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Status": {
+      "main": [
+        [
+          {
+            "node": "Audit Log",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Respond 200 OK",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Audit Log",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Respond 202 Escalated",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
+  },
+  "staticData": null,
+  "tags": ["agent-foundation", "email-triage", "ai-agent"],
+  "triggerCount": 0,
+  "updatedAt": "2026-07-25T00:00:00.000Z",
+  "versionId": "1",
+  "meta": {
+    "instanceId": "agent-foundation-v1",
+    "templateId": "agent-foundation-email-triage"
+  }
+}

@@ -1,0 +1,212 @@
+{
+  "name": "MS365 Email Triage — Claude AI",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "minutes", "minutesInterval": 5 }]
+        }
+      },
+      "id": "node_schedule",
+      "name": "Every 5 Minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [200, 300]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "getAll",
+        "returnAll": false,
+        "limit": 20,
+        "filters": {
+          "isRead": false,
+          "folder": "inbox"
+        },
+        "options": {}
+      },
+      "id": "node_fetch_emails",
+      "name": "Fetch Unread Emails",
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [420, 300],
+      "credentials": {
+        "microsoftOutlookOAuth2Api": { "id": "ms365_creds", "name": "Microsoft 365" }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $json.value.length }}",
+              "operation": "larger",
+              "value2": 0
+            }
+          ]
+        }
+      },
+      "id": "node_has_emails",
+      "name": "Has Unread Emails?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [640, 300]
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "value",
+        "options": {}
+      },
+      "id": "node_split",
+      "name": "Split Into Individual Emails",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [860, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "x-api-key", "value": "={{ $env.ANTHROPIC_API_KEY }}" },
+            { "name": "anthropic-version", "value": "2023-06-01" },
+            { "name": "content-type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"claude-haiku-4-5-20251001\",\n  \"max_tokens\": 512,\n  \"system\": \"You are an email triage assistant. Classify the email and draft a reply.\\n\\nCategories:\\n- urgent: production issues, same-day action required\\n- vip: executive/enterprise/strategic partner\\n- routine: normal business correspondence\\n- spam: unsolicited/irrelevant\\n\\nRespond in JSON only:\\n{\\\"category\\\": \\\"urgent|routine|spam|vip\\\", \\\"confidence\\\": 0.0-1.0, \\\"reasoning\\\": \\\"one sentence\\\", \\\"reply_needed\\\": true|false, \\\"draft_reply\\\": \\\"reply text or null\\\", \\\"task_title\\\": \\\"task description or null\\\", \\\"auto_sendable\\\": true|false}\",\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"From: {{ $json.from.emailAddress.address }}\\nSubject: {{ $json.subject }}\\n\\nBody:\\n{{ $json.bodyPreview }}\"\n    }\n  ]\n}",
+        "options": { "timeout": 30000 }
+      },
+      "id": "node_claude_classify",
+      "name": "Claude — Classify Email",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1080, 200]
+    },
+    {
+      "parameters": {
+        "functionCode": "const email = $input.first().json;\nconst claudeResp = JSON.parse($input.first().json.content[0].text);\n\nreturn [{\n  json: {\n    email_id: email.id,\n    subject: email.subject,\n    sender: email.from?.emailAddress?.address,\n    category: claudeResp.category,\n    confidence: claudeResp.confidence,\n    reasoning: claudeResp.reasoning,\n    reply_needed: claudeResp.reply_needed,\n    draft_reply: claudeResp.draft_reply,\n    task_title: claudeResp.task_title,\n    auto_sendable: claudeResp.auto_sendable,\n  }\n}];"
+      },
+      "id": "node_parse",
+      "name": "Parse Classification",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1300, 200]
+    },
+    {
+      "parameters": {
+        "dataType": "string",
+        "value1": "={{ $json.category }}",
+        "rules": {
+          "rules": [
+            { "value2": "urgent",  "output": 0 },
+            { "value2": "vip",     "output": 0 },
+            { "value2": "routine", "output": 1 },
+            { "value2": "spam",    "output": 2 }
+          ]
+        },
+        "fallbackOutput": 1
+      },
+      "id": "node_route",
+      "name": "Route by Category",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [1520, 200]
+    },
+    {
+      "parameters": {
+        "channel": "={{ $env.SLACK_URGENT_CHANNEL }}",
+        "text": "🚨 *{{ $json.category.toUpperCase() }} EMAIL*\nFrom: {{ $json.sender }}\nSubject: {{ $json.subject }}\nReason: {{ $json.reasoning }}",
+        "otherOptions": {}
+      },
+      "id": "node_slack_urgent",
+      "name": "Slack Alert — Urgent/VIP",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [1740, 100],
+      "credentials": {
+        "slackApi": { "id": "slack_creds", "name": "Slack" }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "subject": "Re: {{ $json.subject }}",
+        "bodyContent": "={{ $json.draft_reply }}",
+        "additionalFields": {}
+      },
+      "id": "node_create_draft",
+      "name": "Create Draft Reply",
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [1740, 200],
+      "credentials": {
+        "microsoftOutlookOAuth2Api": { "id": "ms365_creds", "name": "Microsoft 365" }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "update",
+        "messageId": "={{ $json.email_id }}",
+        "updateFields": {
+          "isRead": true,
+          "categories": ["={{ $json.category }}"]
+        }
+      },
+      "id": "node_mark_read",
+      "name": "Mark as Read + Label",
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [1740, 320],
+      "credentials": {
+        "microsoftOutlookOAuth2Api": { "id": "ms365_creds", "name": "Microsoft 365" }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "update",
+        "messageId": "={{ $json.email_id }}",
+        "updateFields": {
+          "isRead": true,
+          "categories": ["spam"]
+        }
+      },
+      "id": "node_archive_spam",
+      "name": "Mark Spam as Read",
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [1740, 440],
+      "credentials": {
+        "microsoftOutlookOAuth2Api": { "id": "ms365_creds", "name": "Microsoft 365" }
+      }
+    }
+  ],
+  "connections": {
+    "Every 5 Minutes":               { "main": [[{ "node": "Fetch Unread Emails",          "type": "main", "index": 0 }]] },
+    "Fetch Unread Emails":           { "main": [[{ "node": "Has Unread Emails?",            "type": "main", "index": 0 }]] },
+    "Has Unread Emails?":            { "main": [[{ "node": "Split Into Individual Emails",  "type": "main", "index": 0 }], []] },
+    "Split Into Individual Emails":  { "main": [[{ "node": "Claude — Classify Email",       "type": "main", "index": 0 }]] },
+    "Claude — Classify Email":       { "main": [[{ "node": "Parse Classification",          "type": "main", "index": 0 }]] },
+    "Parse Classification":          { "main": [[{ "node": "Route by Category",             "type": "main", "index": 0 }]] },
+    "Route by Category": {
+      "main": [
+        [{ "node": "Slack Alert — Urgent/VIP", "type": "main", "index": 0 }, { "node": "Create Draft Reply", "type": "main", "index": 0 }, { "node": "Mark as Read + Label", "type": "main", "index": 0 }],
+        [{ "node": "Create Draft Reply",       "type": "main", "index": 0 }, { "node": "Mark as Read + Label", "type": "main", "index": 0 }],
+        [{ "node": "Mark Spam as Read",        "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true
+  },
+  "tags": ["ms365", "email-triage", "claude", "ai-agent"],
+  "meta": {
+    "templateId": "ms365-email-triage-v1"
+  }
+}
