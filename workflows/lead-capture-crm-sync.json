@@ -1,0 +1,62 @@
+{
+  "name": "Lead Capture & CRM Sync Automation",
+  "nodes": [
+    {
+      "parameters": { "httpMethod": "POST", "path": "lead-capture", "responseMode": "responseNode" },
+      "id": "node-001", "name": "Webhook - New Lead",
+      "type": "n8n-nodes-base.webhook", "typeVersion": 1, "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "modelId": "claude-3-5-sonnet-20241022",
+        "messages": { "values": [{ "role": "user", "content": "Score this lead 1-10 and qualify them. Name: {{ $json.name }}, Company: {{ $json.company }}, Email: {{ $json.email }}, Message: {{ $json.message }}. Return JSON: { score: number, tier: hot|warm|cold, reason: string, follow_up_priority: immediate|within_24h|within_week }" }] }
+      },
+      "id": "node-002", "name": "Claude Lead Scorer",
+      "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic", "typeVersion": 1, "position": [460, 300]
+    },
+    {
+      "parameters": { "jsCode": "const raw = $input.first().json.content[0].text; const score = JSON.parse(raw); const lead = $('Webhook - New Lead').first().json; return [{ json: { ...score, ...lead, created_at: new Date().toISOString() } }];" },
+      "id": "node-003", "name": "Merge Lead + Score",
+      "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "resource": "contact", "operation": "create",
+        "additionalFields": { "firstName": "={{ $json.name.split(' ')[0] }}", "lastName": "={{ $json.name.split(' ').slice(1).join(' ') }}", "email": "={{ $json.email }}", "company": "={{ $json.company }}", "leadScore": "={{ $json.score }}", "leadStatus": "={{ $json.tier === 'hot' ? 'New' : 'Open' }}"
+        }
+      },
+      "id": "node-004", "name": "Create HubSpot Contact",
+      "type": "n8n-nodes-base.hubspot", "typeVersion": 2, "position": [900, 200]
+    },
+    {
+      "parameters": {
+        "resource": "spreadsheets.values", "operation": "append",
+        "spreadsheetId": "YOUR_GOOGLE_SHEET_ID", "range": "Leads!A:H",
+        "dataToSend": "defineBelow",
+        "fieldsUi": { "values": [{ "fieldId": "A", "fieldValue": "={{ $json.created_at }}" }, { "fieldId": "B", "fieldValue": "={{ $json.name }}" }, { "fieldId": "C", "fieldValue": "={{ $json.email }}" }, { "fieldId": "D", "fieldValue": "={{ $json.company }}" }, { "fieldId": "E", "fieldValue": "={{ $json.score }}" }, { "fieldId": "F", "fieldValue": "={{ $json.tier }}" }, { "fieldId": "G", "fieldValue": "={{ $json.reason }}" }, { "fieldId": "H", "fieldValue": "={{ $json.follow_up_priority }}" }] }
+      },
+      "id": "node-005", "name": "Log to Google Sheets",
+      "type": "n8n-nodes-base.googleSheets", "typeVersion": 4, "position": [900, 400]
+    },
+    {
+      "parameters": {
+        "conditions": { "string": [{ "value1": "={{ $json.tier }}", "operation": "equals", "value2": "hot" }] }
+      },
+      "id": "node-006", "name": "Hot Lead?",
+      "type": "n8n-nodes-base.if", "typeVersion": 1, "position": [1120, 300]
+    },
+    {
+      "parameters": { "content": "=:fire: HOT LEAD\nName: {{ $json.name }}\nCompany: {{ $json.company }}\nScore: {{ $json.score }}/10\nReason: {{ $json.reason }}\nAction: {{ $json.follow_up_priority }}", "chatId": "YOUR_SLACK_CHANNEL" },
+      "id": "node-007", "name": "Slack - Hot Lead Alert",
+      "type": "n8n-nodes-base.slack", "typeVersion": 2, "position": [1340, 200]
+    }
+  ],
+  "connections": {
+    "Webhook - New Lead": { "main": [[{ "node": "Claude Lead Scorer", "type": "main", "index": 0 }]] },
+    "Claude Lead Scorer": { "main": [[{ "node": "Merge Lead + Score", "type": "main", "index": 0 }]] },
+    "Merge Lead + Score": { "main": [[{ "node": "Create HubSpot Contact", "type": "main", "index": 0 }, { "node": "Log to Google Sheets", "type": "main", "index": 0 }]] },
+    "Create HubSpot Contact": { "main": [[{ "node": "Hot Lead?", "type": "main", "index": 0 }]] },
+    "Hot Lead?": { "main": [[{ "node": "Slack - Hot Lead Alert", "type": "main", "index": 0 }], []] }
+  },
+  "settings": { "executionOrder": "v1" }
+}
