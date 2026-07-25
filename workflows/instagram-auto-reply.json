@@ -1,0 +1,21 @@
+{
+  "name": "Instagram DM Auto-Reply (OpenAI + Meta API)",
+  "nodes": [
+    {"parameters":{"httpMethod":"POST","path":"instagram-webhook","responseMode":"responseNode","options":{}},"id":"node-001","name":"Instagram Webhook","type":"n8n-nodes-base.webhook","typeVersion":2,"position":[240,300]},
+    {"parameters":{"jsCode":"const body=$input.first().json.body;const entry=body.entry?.[0];const messaging=entry?.messaging?.[0];if(!messaging?.message?.text)return[];return[{json:{sender_id:messaging.sender.id,recipient_id:messaging.recipient.id,message_text:messaging.message.text,message_id:messaging.message.mid,timestamp:messaging.timestamp}}];"},"id":"node-002","name":"Parse DM Payload","type":"n8n-nodes-base.code","typeVersion":2,"position":[460,300]},
+    {"parameters":{"conditions":{"string":[{"value1":"={{ $json.message_text }}","operation":"isNotEmpty"}]}},"id":"node-003","name":"Has Message?","type":"n8n-nodes-base.if","typeVersion":1,"position":[680,300]},
+    {"parameters":{"model":"gpt-4o-mini","messages":{"values":[{"role":"system","content":"You are a friendly Instagram business assistant. Reply to DMs helpfully and concisely. Keep replies under 200 characters."},{"role":"user","content":"={{ $json.message_text }}"}]},"options":{"maxTokens":150,"temperature":0.7}},"id":"node-004","name":"OpenAI Generate Reply","type":"@n8n/n8n-nodes-langchain.lmChatOpenAi","typeVersion":1,"position":[900,200]},
+    {"parameters":{"url":"=https://graph.facebook.com/v18.0/me/messages","sendBody":true,"bodyParameters":{"parameters":[{"name":"recipient","value":"={{ JSON.stringify({ id: $('Parse DM Payload').first().json.sender_id }) }}"},{"name":"message","value":"={{ JSON.stringify({ text: $json.message }) }}"},{"name":"access_token","value":"YOUR_PAGE_ACCESS_TOKEN"}]},"options":{}},"id":"node-005","name":"Send Reply via Meta API","type":"n8n-nodes-base.httpRequest","typeVersion":4.1,"position":[1120,200]},
+    {"parameters":{"jsCode":"const r=$input.first().json;if(r.error){throw new Error('Meta API: '+r.error.message);}return[{json:{success:true,message_id:r.message_id}}];"},"id":"node-006","name":"Verify & Log","type":"n8n-nodes-base.code","typeVersion":2,"position":[1340,200]},
+    {"parameters":{"respondWith":"json","responseBody":"={ \"received\": true }"},"id":"node-007","name":"Webhook 200 OK","type":"n8n-nodes-base.respondToWebhook","typeVersion":1,"position":[900,420]}
+  ],
+  "connections":{
+    "Instagram Webhook":{"main":[[{"node":"Parse DM Payload","type":"main","index":0}]]},
+    "Parse DM Payload":{"main":[[{"node":"Has Message?","type":"main","index":0}]]},
+    "Has Message?":{"main":[[{"node":"OpenAI Generate Reply","type":"main","index":0}],[{"node":"Webhook 200 OK","type":"main","index":0}]]},
+    "OpenAI Generate Reply":{"main":[[{"node":"Send Reply via Meta API","type":"main","index":0}]]},
+    "Send Reply via Meta API":{"main":[[{"node":"Verify & Log","type":"main","index":0}]]}
+  },
+  "settings":{"executionOrder":"v1"},
+  "notes":"Setup: 1) Create Meta App 2) Add Instagram product 3) Set webhook URL 4) Subscribe to messages 5) Replace YOUR_PAGE_ACCESS_TOKEN"
+}
