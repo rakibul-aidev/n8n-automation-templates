@@ -1,0 +1,45 @@
+{
+  "name": "Email Triage & Auto-Response Automation",
+  "nodes": [
+    {
+      "parameters": { "pollTimes": { "item": [{ "mode": "everyMinute" }] }, "filters": { "readStatus": "unread" } },
+      "id": "node-001", "name": "Gmail Trigger",
+      "type": "n8n-nodes-base.gmailTrigger", "typeVersion": 1, "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "modelId": "claude-3-5-sonnet-20241022",
+        "messages": { "values": [{ "role": "user", "content": "Classify this email. Subject: {{ $json.subject }}. Body: {{ $json.text }}. Return JSON: { category: support|sales|billing|spam|other, priority: high|medium|low, requires_human: true|false, suggested_reply: string|null }" }] }
+      },
+      "id": "node-002", "name": "Claude AI Classifier",
+      "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic", "typeVersion": 1, "position": [460, 300]
+    },
+    {
+      "parameters": { "jsCode": "const raw = $input.first().json.content[0].text; const parsed = JSON.parse(raw); return [{ json: { ...parsed, original: $('Gmail Trigger').first().json } }];" },
+      "id": "node-003", "name": "Parse Classification",
+      "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [680, 300]
+    },
+    {
+      "parameters": { "conditions": { "boolean": [{ "value1": "={{ $json.requires_human }}", "value2": false }] } },
+      "id": "node-004", "name": "Needs Human?",
+      "type": "n8n-nodes-base.if", "typeVersion": 1, "position": [900, 300]
+    },
+    {
+      "parameters": { "sendTo": "={{ $json.original.from.value[0].address }}", "subject": "=Re: {{ $json.original.subject }}", "message": "={{ $json.suggested_reply }}" },
+      "id": "node-005", "name": "Send Auto-Reply",
+      "type": "n8n-nodes-base.gmail", "typeVersion": 2, "position": [1120, 200]
+    },
+    {
+      "parameters": { "content": "=Review needed\nFrom: {{ $json.original.from.value[0].address }}\nSubject: {{ $json.original.subject }}\nPriority: {{ $json.priority }}", "chatId": "YOUR_SLACK_CHANNEL" },
+      "id": "node-006", "name": "Slack Alert",
+      "type": "n8n-nodes-base.slack", "typeVersion": 2, "position": [1120, 400]
+    }
+  ],
+  "connections": {
+    "Gmail Trigger": { "main": [[{ "node": "Claude AI Classifier", "type": "main", "index": 0 }]] },
+    "Claude AI Classifier": { "main": [[{ "node": "Parse Classification", "type": "main", "index": 0 }]] },
+    "Parse Classification": { "main": [[{ "node": "Needs Human?", "type": "main", "index": 0 }]] },
+    "Needs Human?": { "main": [[{ "node": "Send Auto-Reply", "type": "main", "index": 0 }], [{ "node": "Slack Alert", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" }
+}
