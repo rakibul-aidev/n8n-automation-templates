@@ -184,6 +184,43 @@
       "credentials": {
         "microsoftOutlookOAuth2Api": { "id": "ms365_creds", "name": "Microsoft 365" }
       }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [],
+          "string": [
+            {
+              "value1": "={{ $json.task_title }}",
+              "operation": "isNotEmpty"
+            }
+          ]
+        }
+      },
+      "id": "node_has_task",
+      "name": "Needs Follow-up Task?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1520, 340]
+    },
+    {
+      "parameters": {
+        "resource": "task",
+        "operation": "create",
+        "taskListId": "={{ $env.MS_TODO_LIST_ID }}",
+        "title": "={{ $json.task_title }}",
+        "additionalFields": {
+          "body": "=Follow-up needed for email from {{ $json.sender }} — Subject: {{ $json.subject }}\n\nReason: {{ $json.reasoning }}"
+        }
+      },
+      "id": "node_create_todo",
+      "name": "Create Microsoft To Do Task",
+      "type": "n8n-nodes-base.microsoftToDo",
+      "typeVersion": 1,
+      "position": [1740, 340],
+      "credentials": {
+        "microsoftToDoOAuth2Api": { "id": "ms365_creds", "name": "Microsoft 365" }
+      }
     }
   ],
   "connections": {
@@ -192,7 +229,8 @@
     "Has Unread Emails?":            { "main": [[{ "node": "Split Into Individual Emails",  "type": "main", "index": 0 }], []] },
     "Split Into Individual Emails":  { "main": [[{ "node": "Claude — Classify Email",       "type": "main", "index": 0 }]] },
     "Claude — Classify Email":       { "main": [[{ "node": "Parse Classification",          "type": "main", "index": 0 }]] },
-    "Parse Classification":          { "main": [[{ "node": "Route by Category",             "type": "main", "index": 0 }]] },
+    "Parse Classification":          { "main": [[{ "node": "Route by Category",             "type": "main", "index": 0 }, { "node": "Needs Follow-up Task?", "type": "main", "index": 0 }]] },
+    "Needs Follow-up Task?":         { "main": [[{ "node": "Create Microsoft To Do Task",    "type": "main", "index": 0 }], []] },
     "Route by Category": {
       "main": [
         [{ "node": "Slack Alert — Urgent/VIP", "type": "main", "index": 0 }, { "node": "Create Draft Reply", "type": "main", "index": 0 }, { "node": "Mark as Read + Label", "type": "main", "index": 0 }],

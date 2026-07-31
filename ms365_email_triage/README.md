@@ -32,6 +32,7 @@ Automated email triage for Microsoft 365 Outlook using n8n + Claude AI.
    - `Tasks.ReadWrite` (for To Do integration)
    - `ChannelMessage.Send` (optional, for Teams alerts)
 7. Click **Grant admin consent**
+8. In [Microsoft To Do](https://to-do.office.com/), create (or pick) the task list you want follow-ups created in, then copy its list ID into `MS_TODO_LIST_ID` (find it via `GET https://graph.microsoft.com/v1.0/me/todo/lists` with your Graph token)
 
 ## Environment Variables
 
@@ -43,6 +44,7 @@ ANTHROPIC_API_KEY=sk-ant-...
 SLACK_BOT_TOKEN=xoxb-...
 SLACK_URGENT_CHANNEL=#urgent-emails
 USER_EMAIL=your@outlook.com
+MS_TODO_LIST_ID=your-to-do-list-id
 ```
 
 ## Quick Start

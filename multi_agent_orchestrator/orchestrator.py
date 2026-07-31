@@ -15,6 +15,7 @@ from langchain_anthropic import ChatAnthropic
 from langgraph.graph import StateGraph, END
 
 from shared.state import AgentState
+from shared import memory
 from agents.supervisor import supervisor_node, route_from_supervisor
 from agents.researcher import researcher_node
 from agents.writer import writer_node
@@ -70,23 +71,39 @@ def run(task: str, max_iterations: int = 10) -> dict[str, Any]:
     """Run the multi-agent pipeline for a given task."""
     app = build_graph()
 
+    task_id = str(uuid.uuid4())
     initial_state = AgentState(
         task=task,
-        task_id=str(uuid.uuid4()),
+        task_id=task_id,
         max_iterations=max_iterations,
     )
 
     print(f"\n{'='*60}")
     print(f"Task: {task}")
+    print(f"Task ID: {task_id}")
+    if memory.enabled:
+        print("Shared memory: PostgreSQL (persisting every step)")
+    else:
+        print("Shared memory: disabled (set POSTGRES_HOST in .env to enable)")
     print(f"{'='*60}\n")
 
+    if memory.enabled:
+        memory.init_schema()
+        memory.save_state(task_id, initial_state.model_dump(), status="running")
+
     final_state = app.invoke(initial_state)
+
+    if memory.enabled:
+        memory.save_state(task_id, dict(final_state), status=final_state["status"])
 
     print(f"\n{'='*60}")
     print(f"Status: {final_state['status']}")
     print(f"Iterations: {final_state['iteration']}")
     if final_state.get("final_output"):
         print(f"\nFinal Output:\n{final_state['final_output']}")
+    if memory.enabled:
+        print(f"\nFull step history persisted under task_id={task_id}")
+        print("Retrieve it any time with: shared.memory.get_history(task_id)")
     print(f"{'='*60}\n")
 
     return {

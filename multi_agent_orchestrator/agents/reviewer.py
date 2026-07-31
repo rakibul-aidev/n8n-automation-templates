@@ -9,6 +9,7 @@ import json, re
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from shared.state import AgentState
+from shared import memory
 
 REVIEWER_SYSTEM = """You are a quality reviewer. Given a task brief and a draft, assess whether the draft meets the requirements.
 
@@ -61,6 +62,7 @@ Review the draft now."""
     score    = data.get("score", 0)
 
     print(f"[Reviewer] Score: {score}/10 | Approved: {approved} | Notes: {notes[:80]}")
+    memory.log_agent_step(state.task_id, "reviewer", raw)
 
     update: dict = {
         "approved":      approved,

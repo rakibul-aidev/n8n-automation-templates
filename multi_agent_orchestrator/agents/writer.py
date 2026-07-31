@@ -8,6 +8,7 @@ from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from shared.state import AgentState
+from shared import memory
 
 WRITER_SYSTEM = """You are a professional content writer. You receive a task and research notes, and produce a high-quality draft.
 
@@ -50,4 +51,5 @@ Write the draft now."""
     draft = response.content
 
     print(f"[Writer] Draft produced — {len(draft.split())} words")
+    memory.log_agent_step(state.task_id, "writer", draft)
     return {"draft_output": draft, "next_agent": "supervisor"}

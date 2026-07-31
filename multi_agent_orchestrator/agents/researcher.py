@@ -10,6 +10,7 @@ from langchain_core.tools import BaseTool
 
 from shared.state import AgentState
 from shared.tools import RESEARCHER_TOOLS
+from shared import memory
 
 RESEARCHER_SYSTEM = """You are a research specialist. Your job is to gather accurate, relevant information to support a writing task.
 
@@ -64,5 +65,7 @@ def researcher_node(state: AgentState, model: Any) -> dict:
 
     research_output = response.content
     print(f"[Researcher] Completed — {len(research_log)} tool calls, {len(research_output)} chars")
+
+    memory.log_agent_step(state.task_id, "researcher", research_output)
 
     return {"research_output": research_output, "next_agent": "supervisor"}

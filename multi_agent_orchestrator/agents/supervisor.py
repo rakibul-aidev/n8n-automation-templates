@@ -8,6 +8,7 @@ from typing import Any, Literal
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from shared.state import AgentState
+from shared import memory
 
 SUPERVISOR_SYSTEM = """You are a supervisor coordinating a team of agents to complete a task.
 
@@ -66,14 +67,26 @@ Iteration: {state.iteration + 1}/{state.max_iterations}"""
 
     print(f"[Supervisor] → {data.get('next_agent')} | {data.get('reasoning', '')[:80]}")
 
+    new_working_memory = {
+        **state.working_memory,
+        "supervisor_instruction": data.get("instruction", ""),
+    }
+
+    # Persist the routing decision to the shared Postgres memory table so any
+    # other process (a dashboard, a retry job, another worker) can see where
+    # this task stands without holding the LangGraph state in memory.
+    memory.save_state(
+        state.task_id,
+        {**state.model_dump(), "working_memory": new_working_memory, "next_agent": data.get("next_agent", "end")},
+        status=data.get("status", "running"),
+    )
+    memory.log_agent_step(state.task_id, "supervisor", raw)
+
     return {
         "next_agent":  data.get("next_agent", "end"),
         "iteration":   state.iteration + 1,
         "status":      data.get("status", "running"),
-        "working_memory": {
-            **state.working_memory,
-            "supervisor_instruction": data.get("instruction", ""),
-        },
+        "working_memory": new_working_memory,
     }
 
 
